@@ -15,6 +15,8 @@
 
 This module help to use session based authentication for your `echo` web application.
 
+Examples: [link](https://github.com/jockerz/echo-session-auth-example)
+
 
 ## Install
 
@@ -178,7 +180,7 @@ func main() {
 ```
 
 
-### 4. Protecting Echo Routes
+### 4. Protecting Routes
 
 Protected route example for authenticated user only
 
