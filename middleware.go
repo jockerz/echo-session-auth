@@ -23,7 +23,7 @@ const (
 
 type (
 	ISessionAuth interface {
-		// Get Session (extended againts our config) middleware function
+		// Get Session (extended against our config) middleware function
 		GetSessionMiddleware() echo.MiddlewareFunc
 
 		// Get authentication middleware function
