@@ -17,7 +17,6 @@ import (
 )
 
 const (
-	AuthSessionName          = "sessionauth"
 	InvalidCookie            = "invalid cookie"
 	InvalidCookieIndentifier = "invalid cookie identifier"
 )
@@ -41,8 +40,8 @@ type (
 	}
 
 	SessionAuth struct {
-		config *Config
-		cookie *sessions.CookieStore
+		Config *Config
+		Cookie *sessions.CookieStore
 
 		// Get user method
 		// error is not nil if user is not found
@@ -51,12 +50,10 @@ type (
 )
 
 // Create SessionAuth by
-func Create(
-	config *Config, getUser func(c echo.Context, UserId any) error,
-) (SessionAuth, error) {
-	sa := SessionAuth{
-		config:  config,
-		cookie:  sessions.NewCookieStore([]byte(config.SecretKey)),
+func Create(config *Config, getUser func(c echo.Context, UserId any) error) (*SessionAuth, error) {
+	sa := &SessionAuth{
+		Config:  config,
+		Cookie:  sessions.NewCookieStore([]byte(config.SecretKey)),
 		GetUser: getUser,
 	}
 
@@ -64,7 +61,7 @@ func Create(
 }
 
 func (s *SessionAuth) GetSessionMiddleware() echo.MiddlewareFunc {
-	return session.Middleware(s.cookie)
+	return session.Middleware(s.Cookie)
 }
 
 func (s *SessionAuth) AuthMiddlewareFunc(next echo.HandlerFunc) echo.HandlerFunc {
@@ -75,25 +72,25 @@ func (s *SessionAuth) AuthMiddlewareFunc(next echo.HandlerFunc) echo.HandlerFunc
 		}
 
 		// Get auth session
-		sess, err := session.Get(AuthSessionName, ctx)
+		sess, err := session.Get(s.Config.AuthSessionName, ctx)
 		if err != nil {
 			ctx.Error(err)
 		}
 
 		// Get UserID from auth session
-		UserID, ok := sess.Values[s.config.SessionKey]
+		UserID, ok := sess.Values[s.Config.SessionKey]
 		if !ok {
 			// Get UserID from remember cookie
 			UserID, err = s.GetCookie(ctx)
 			if err != nil {
 				if err.Error() == InvalidCookieIndentifier {
-					sess.Values[s.config.SessionRememberCookie] = "clear"
+					sess.Values[s.Config.SessionRememberCookie] = "clear"
 				}
 			}
 
 			if UserID != nil {
 				// Session is not fresh anymore
-				sess.Values[s.config.SessionFresh] = false
+				sess.Values[s.Config.SessionFresh] = false
 			}
 		}
 
@@ -102,20 +99,20 @@ func (s *SessionAuth) AuthMiddlewareFunc(next echo.HandlerFunc) echo.HandlerFunc
 			s.GetUser(ctx, UserID)
 		}
 
+		if err := next(ctx); err != nil {
+			ctx.Error(err)
+		}
+
 		// Get remember me cookie operation
-		op, isExist := sess.Values[s.config.SessionRememberCookie]
+		op, isExist := sess.Values[s.Config.SessionRememberCookie]
 		if isExist {
 			if op == "set" {
 				// Set remember cookie
 				s.SetCookie(ctx, fmt.Sprintf("%v", UserID))
 			} else if op == "clear" {
-				sess.Values[s.config.SessionRememberCookie] = ""
+				sess.Values[s.Config.SessionRememberCookie] = ""
 				s.DeleteCookie(ctx)
 			}
-		}
-
-		if err := next(ctx); err != nil {
-			ctx.Error(err)
 		}
 
 		return nil
@@ -129,19 +126,19 @@ func (s *SessionAuth) PathIsExcluded(path string) bool {
 	}
 
 	// Path is UnauthRedirect (usually "/login")
-	if u.Path == s.config.UnAuthRedirect {
+	if u.Path == s.Config.UnAuthRedirect {
 		return true
 	}
 
 	// Check path for excluded string match
-	for _, v := range s.config.Excluded {
+	for _, v := range s.Config.Excluded {
 		if v == u.Path {
 			return true
 		}
 	}
 
 	// Check path for excluded regex match
-	for _, v := range s.config.ExcludedRegex {
+	for _, v := range s.Config.ExcludedRegex {
 		if v.Match([]byte(u.Path)) {
 			return true
 		}
@@ -153,33 +150,33 @@ func (s *SessionAuth) PathIsExcluded(path string) bool {
 
 // Save session cookie options
 func (s *SessionAuth) setSessionOption(ctx echo.Context, sess *sessions.Session) {
-	sess.Options.Domain = s.config.CookieDomain
-	sess.Options.HttpOnly = s.config.CookieHTTPOnly
-	sess.Options.Path = s.config.CookiePath
-	sess.Options.Secure = s.config.CookieSecure
-	sess.Options.SameSite = s.config.CookieSameSite
+	sess.Options.Domain = s.Config.CookieDomain
+	sess.Options.HttpOnly = s.Config.CookieHTTPOnly
+	sess.Options.Path = s.Config.CookiePath
+	sess.Options.Secure = s.Config.CookieSecure
+	sess.Options.SameSite = s.Config.CookieSameSite
 }
 
 func (s *SessionAuth) SetCookie(ctx echo.Context, UserID string) {
 	cookie := new(http.Cookie)
 
-	cookie.Name = s.config.CookieName
-	d := CookieDigest(UserID, s.config.SecretKey)
+	cookie.Name = s.Config.CookieName
+	d := CookieDigest(UserID, s.Config.SecretKey)
 	cookie.Value = fmt.Sprintf("%v|%v", UserID, base64.StdEncoding.EncodeToString(d))
 
-	cookie.Domain = s.config.CookieDomain
-	cookie.Expires = time.Now().Add(time.Second * time.Duration(s.config.CookieDuration))
-	cookie.Secure = s.config.CookieSecure
-	cookie.HttpOnly = s.config.CookieHTTPOnly
-	cookie.SameSite = s.config.CookieSameSite
-	cookie.Path = s.config.CookiePath
+	cookie.Domain = s.Config.CookieDomain
+	cookie.Expires = time.Now().Add(time.Second * time.Duration(s.Config.CookieDuration))
+	cookie.Secure = s.Config.CookieSecure
+	cookie.HttpOnly = s.Config.CookieHTTPOnly
+	cookie.SameSite = s.Config.CookieSameSite
+	cookie.Path = s.Config.CookiePath
 
 	// Load to current echo.context
 	ctx.SetCookie(cookie)
 }
 
 func (s *SessionAuth) GetCookie(ctx echo.Context) (interface{}, error) {
-	cookie, err := ctx.Cookie(s.config.CookieName)
+	cookie, err := ctx.Cookie(s.Config.CookieName)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +189,12 @@ func (s *SessionAuth) GetCookie(ctx echo.Context) (interface{}, error) {
 	UserID := splits[0]
 	c := splits[1]
 
-	CookieID, err := DecodeCookie(c, s.config.SecretKey)
+	CookieID, err := DecodeCookie(c, s.Config.SecretKey)
 	if err != nil {
 		return nil, err
 	}
 
-	v := CookieDigest(UserID, s.config.SecretKey)
+	v := CookieDigest(UserID, s.Config.SecretKey)
 
 	// remember cookie identifier
 	if !hmac.Equal(CookieID, v) {
@@ -209,11 +206,11 @@ func (s *SessionAuth) GetCookie(ctx echo.Context) (interface{}, error) {
 
 func (s *SessionAuth) DeleteCookie(ctx echo.Context) {
 	cookie := &http.Cookie{
-		Name:     s.config.CookieName,
+		Name:     s.Config.CookieName,
 		Value:    "",
-		HttpOnly: s.config.CookieHTTPOnly,
-		SameSite: s.config.CookieSameSite,
-		Path:     s.config.CookiePath,
+		HttpOnly: s.Config.CookieHTTPOnly,
+		SameSite: s.Config.CookieSameSite,
+		Path:     s.Config.CookiePath,
 		MaxAge:   -1,
 	}
 
@@ -225,7 +222,7 @@ func (s *SessionAuth) DeleteCookie(ctx echo.Context) {
 // if "remember" is true, save remember_me cookie
 // UserID should be represented as string
 func (s *SessionAuth) Login(ctx echo.Context, UserId string, fresh bool, remember bool) error {
-	sess, err := session.Get(AuthSessionName, ctx)
+	sess, err := session.Get(s.Config.AuthSessionName, ctx)
 	if err != nil {
 		return err
 	}
@@ -235,14 +232,14 @@ func (s *SessionAuth) Login(ctx echo.Context, UserId string, fresh bool, remembe
 	h := ctx.Request().Header
 	ua := h["User-Agent"]
 
-	sess.Values[s.config.SessionID] = CreateSessionID(ctx.RealIP(), ua)
-	sess.Values[s.config.SessionKey] = UserId
-	sess.Values[s.config.SessionFresh] = fresh
+	sess.Values[s.Config.SessionID] = CreateSessionID(ctx.RealIP(), ua)
+	sess.Values[s.Config.SessionKey] = UserId
+	sess.Values[s.Config.SessionFresh] = fresh
 
 	if remember {
-		sess.Values[s.config.SessionRememberCookie] = "set"
-		if s.config.CookieDuration > 0 {
-			sess.Values[s.config.SessionRememberDuration] = s.config.CookieDuration
+		sess.Values[s.Config.SessionRememberCookie] = "set"
+		if s.Config.CookieDuration > 0 {
+			sess.Values[s.Config.SessionRememberDuration] = s.Config.CookieDuration
 		}
 	}
 
@@ -253,7 +250,7 @@ func (s *SessionAuth) Login(ctx echo.Context, UserId string, fresh bool, remembe
 }
 
 func (s *SessionAuth) Logout(ctx echo.Context) {
-	sess, err := session.Get(AuthSessionName, ctx)
+	sess, err := session.Get(s.Config.AuthSessionName, ctx)
 	if err != nil {
 		return
 	}
@@ -261,17 +258,18 @@ func (s *SessionAuth) Logout(ctx echo.Context) {
 	// Auth session with no UserID value
 	h := ctx.Request().Header
 	ua := h["User-Agent"]
-	sess.Values[s.config.SessionID] = CreateSessionID(ctx.RealIP(), ua)
+	sess.Values[s.Config.SessionID] = CreateSessionID(ctx.RealIP(), ua)
 	// sess.Values[s.config.SessionID] = ""
 	// To be cleared on `AuthMiddlewareFunc`
-	sess.Values[s.config.SessionRememberCookie] = "clear"
+	sess.Values[s.Config.SessionRememberCookie] = "clear"
 
 	v := reflect.ValueOf(sess.Values)
-	v.SetMapIndex(reflect.ValueOf(s.config.SessionKey), reflect.Value{})
-	v.SetMapIndex(reflect.ValueOf(s.config.SessionFresh), reflect.Value{})
-	v.SetMapIndex(reflect.ValueOf(s.config.SessionID), reflect.Value{})
-	v.SetMapIndex(reflect.ValueOf(s.config.SessionRememberDuration), reflect.Value{})
+	v.SetMapIndex(reflect.ValueOf(s.Config.SessionKey), reflect.Value{})
+	v.SetMapIndex(reflect.ValueOf(s.Config.SessionFresh), reflect.Value{})
+	v.SetMapIndex(reflect.ValueOf(s.Config.SessionID), reflect.Value{})
+	v.SetMapIndex(reflect.ValueOf(s.Config.SessionRememberDuration), reflect.Value{})
 
+	s.DeleteCookie(ctx)
 	sess.Save(ctx.Request(), ctx.Response())
 	// v.(*session.Session).Save(ctx.Request(), ctx.Response())
 }
@@ -281,7 +279,7 @@ func (s *SessionAuth) Logout(ctx echo.Context) {
 // Returns redirect to "config.UnauthRedirect" with last path as next URL query
 func (s *SessionAuth) LoginRequired(ctx echo.Context) error {
 	// UnauthRedirect is not set
-	if s.config.UnAuthRedirect == "" {
+	if s.Config.UnAuthRedirect == "" {
 		return ctx.NoContent(http.StatusUnauthorized)
 	}
 
@@ -301,18 +299,18 @@ func (s *SessionAuth) LoginRequired(ctx echo.Context) error {
 // Returns redirect to "config.UnauthRedirect" with last path as next URL query
 func (s *SessionAuth) FreshLoginRequired(ctx echo.Context) error {
 	// UnauthRedirect is not set
-	if s.config.UnAuthRedirect == "" {
+	if s.Config.UnAuthRedirect == "" {
 		return ctx.NoContent(http.StatusUnauthorized)
 	}
 
 	r := reflect.Indirect(reflect.ValueOf(ctx))
 
-	sess, err := session.Get(AuthSessionName, ctx)
+	sess, err := session.Get(s.Config.AuthSessionName, ctx)
 	if err != nil {
 		return err
 	}
 
-	fresh, ok := sess.Values[s.config.SessionFresh]
+	fresh, ok := sess.Values[s.Config.SessionFresh]
 
 	v := r.FieldByName("User")
 
@@ -329,5 +327,5 @@ func (s *SessionAuth) FreshLoginRequired(ctx echo.Context) error {
 func (s *SessionAuth) buildNextURL(ctx echo.Context) string {
 	q := url.Values{}
 	q.Set("next", ctx.Path())
-	return s.config.UnAuthRedirect + "?" + q.Encode()
+	return s.Config.UnAuthRedirect + "?" + q.Encode()
 }

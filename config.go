@@ -1,6 +1,7 @@
 package sessionauth
 
 import (
+	"bytes"
 	"net/http"
 	"os"
 	"regexp"
@@ -14,6 +15,8 @@ const (
 
 // Initial configurations
 type Config struct {
+	// Session auth cookie name
+	AuthSessionName string
 	// Secret key that would be used for cookie and more
 	// Loaded from shell environment `SECRET_KEY`
 	SecretKey []byte
@@ -49,13 +52,18 @@ type Config struct {
 	SessionRememberDuration string
 }
 
-func MakeConfig(UnAuthRedirect string, Excluded []string, ExcludedRegex []*regexp.Regexp) *Config {
+func MakeConfig(SecretKey []byte, UnAuthRedirect string, Excluded []string, ExcludedRegex []*regexp.Regexp) *Config {
+	if !bytes.Equal(SecretKey, []byte{}) {
+		SecretKey = []byte(os.Getenv("SECRET_KEY"))
+	}
+
 	return &Config{
-		SecretKey:       []byte(os.Getenv("SECRET_KEY")),
+		SecretKey:       SecretKey,
 		UnAuthRedirect:  UnAuthRedirect,
 		Excluded:        Excluded,
 		ExcludedRegex:   ExcludedRegex,
 		ProtectionLevel: ProtectionLevelBasic,
+		AuthSessionName: "sessionauth",
 
 		CookieName:     "remember_token",
 		CookiePath:     "/",
@@ -65,11 +73,15 @@ func MakeConfig(UnAuthRedirect string, Excluded []string, ExcludedRegex []*regex
 		// Cookie duration (in seconds) by default is 30 days
 		CookieDuration: 86400 * 30,
 
+		// Session freshness status
 		SessionFresh: "_fresh",
-		// Session Identifier for a User-Agent
-		SessionID:               "_id",
-		SessionKey:              "_user_id",
-		SessionRememberCookie:   "_remember",
+		// Session Identifier
+		SessionID: "_id",
+		// User ID
+		SessionKey: "_user_id",
+		// Remember operation
+		SessionRememberCookie: "_remember",
+		// Remember session duration
 		SessionRememberDuration: "_remember_seconds",
 	}
 }

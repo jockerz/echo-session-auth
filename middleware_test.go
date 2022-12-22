@@ -2,7 +2,6 @@ package sessionauth_test
 
 import (
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,96 +16,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/assert"
 )
-
-type (
-	CustomContext struct {
-		echo.Context
-		User interface{}
-	}
-
-	User struct {
-		ID       uint
-		Username string
-		Password string
-		Name     string
-	}
-
-	LoginParam struct {
-		Username string `form:"username" validate:"required" json:"username"`
-		Password string `form:"password" validate:"required" json:"password"`
-		Remember bool   `form:"remember" json:"remember"`
-	}
-)
-
-var (
-	users = []*User{
-		&User{1, "user1", "pass", "User 1"},
-		&User{2, "user2", "pass", "User 2"},
-	}
-
-	// Configs
-	exc   = []string{"/exc"}
-	excRe = []*regexp.Regexp{
-		regexp.MustCompile(`/static/*`),
-		regexp.MustCompile(`/exc-re*`),
-	}
-	config            = sessionauth.MakeConfig("/login", exc, excRe)
-	sa                = CreateSessionAUth()
-	configEmptyUnAuth = sessionauth.MakeConfig("", exc, excRe)
-	saEmptyUnAuth     = CreateSessionAUth(configEmptyUnAuth)
-)
-
-func CreateSessionAUth(c ...*sessionauth.Config) sessionauth.SessionAuth {
-	// SessionAuth
-	var sa sessionauth.SessionAuth
-	if len(c) > 0 {
-		sa, _ = sessionauth.Create(c[0], GetUser)
-	} else {
-		sa, _ = sessionauth.Create(config, GetUser)
-	}
-	return sa
-}
-
-func GetUser(c echo.Context, UserID interface{}) error {
-	ctx := c.(*CustomContext)
-
-	var uid uint
-	uid_i, err := strconv.Atoi(fmt.Sprintf("%v", UserID))
-
-	for _, u := range users {
-		if err == nil {
-			uid = uint(uid_i)
-		}
-
-		if err == nil && u.ID == uint(uid) {
-			ctx.User = u
-			return nil
-		}
-	}
-	return errors.New("user not found")
-}
-
-func CreateApp() *echo.Echo {
-	// Create Echo
-	app := echo.New()
-	// app.Static("/static", "static")
-	//
-	// // Custom context, required
-	// app.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-	// 	return func(c echo.Context) error {
-	// 		cc := &CustomContext{
-	// 			Context: c,
-	// 			User:    nil,
-	// 		}
-	// 		return next(cc)
-	// 	}
-	// })
-	// // session middleware, required
-	// app.Use(sa.GetSessionMiddleware())
-	// // session authentication middleware, required
-	// app.Use(sa.AuthMiddlewareFunc)
-	return app
-}
 
 // Middleware and its settings
 
@@ -180,87 +89,12 @@ func middlewareChainsLoginThenLogout(next echo.HandlerFunc, uid uint, logout boo
 	return h
 }
 
-// Endpoints
-
-func NoAuthEndpoint(c echo.Context) error {
-	ctx := c.(*CustomContext)
-	data := map[string]interface{}{
-		"user": ctx.User,
-	}
-	return c.JSON(http.StatusOK, data)
-}
-
-func ProtectedEndpoint(c echo.Context) error {
-	ctx := c.(*CustomContext)
-
-	sa.LoginRequired(ctx)
-	data := map[string]interface{}{
-		"user": ctx.User,
-	}
-	return ctx.JSON(http.StatusOK, data)
-}
-
-func ProtectedEndpointFresh(c echo.Context) error {
-	ctx := c.(*CustomContext)
-
-	sa.FreshLoginRequired(ctx)
-	data := map[string]interface{}{
-		"user": ctx.User,
-	}
-	return ctx.JSON(http.StatusOK, data)
-}
-
-func ProtectedEndpoint401(c echo.Context) error {
-	ctx := c.(*CustomContext)
-
-	saEmptyUnAuth.LoginRequired(ctx)
-	data := map[string]interface{}{
-		"user": ctx.User,
-	}
-	return ctx.JSON(http.StatusOK, data)
-}
-
-func ProtectedEndpointFresh401(c echo.Context) error {
-	ctx := c.(*CustomContext)
-
-	saEmptyUnAuth.FreshLoginRequired(ctx)
-	data := map[string]interface{}{
-		"user": ctx.User,
-	}
-	return ctx.JSON(http.StatusOK, data)
-}
-
-func LoginEndpoint(c echo.Context) error {
-	ctx := c.(*CustomContext)
-	var body LoginParam
-
-	if ctx.User != nil {
-		return ctx.Redirect(http.StatusFound, "/")
-	}
-
-	if ctx.Bind(&body) != nil {
-		for _, u := range users {
-			if body.Username == u.Username {
-				// sa.Login(ctx, fmt.Sprintf("%v", u.ID), true, body.Remember)
-				sa.Login(ctx, fmt.Sprintf("%v", u.ID), true, true)
-			}
-		}
-	}
-	data := map[string]interface{}{
-		"username": body.Username,
-		"password": body.Password,
-		"remember": body.Remember,
-		"user":     ctx.User,
-	}
-	return c.JSON(http.StatusOK, data)
-}
-
 // End of endpoints
 
 func TestCreate(t *testing.T) {
 	// create config
 	r := []*regexp.Regexp{}
-	config := sessionauth.MakeConfig("/login", []string{}, r)
+	config := sessionauth.MakeConfig(Secret, "/login", []string{}, r)
 	assert.NotEmpty(t, config)
 
 	// create SessionAuth
@@ -276,7 +110,7 @@ func TestCreate(t *testing.T) {
 func TestGetSessionMiddleware(t *testing.T) {
 	// create SessionAuth
 	r := []*regexp.Regexp{}
-	config := sessionauth.MakeConfig("/login", []string{}, r)
+	config := sessionauth.MakeConfig(Secret, "/login", []string{}, r)
 	sa, _ := sessionauth.Create(config, func(c echo.Context, UserId any) error {
 		return nil
 	})
@@ -315,7 +149,7 @@ func TestAuthMiddlewareFunc_Error_AuthRequired(t *testing.T) {
 	assert.Equal(t, rec.Code, http.StatusFound)
 	assert.Equal(t, rec.Header().Values("Location"), []string{"/login?next="})
 
-	s, err := session.Get(sessionauth.AuthSessionName, ctx)
+	s, err := session.Get(sa.Config.AuthSessionName, ctx)
 	assert.NoError(t, err)
 	assert.Equal(t, s.Values, map[interface{}]interface{}{})
 }
@@ -347,7 +181,7 @@ func TestAuthMiddlewareFunc_Fail_UserNotFound(t *testing.T) {
 	assert.Equal(t, rec.Code, http.StatusFound)
 	assert.NoError(t, err)
 
-	sess, err := session.Get(sessionauth.AuthSessionName, ctx)
+	sess, err := session.Get(sa.Config.AuthSessionName, ctx)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, sess, "Should has `AuthSessionName` session")
 }
@@ -367,7 +201,7 @@ func TestAuthMiddlewareFunc_Success(t *testing.T) {
 	assert.Equal(t, rec.Code, http.StatusOK)
 	assert.NoError(t, err)
 
-	sess, err := session.Get(sessionauth.AuthSessionName, ctx)
+	sess, err := session.Get(sa.Config.AuthSessionName, ctx)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, sess, "Should has `AuthSessionName` session")
 }
@@ -406,7 +240,7 @@ func TestAuthMiddlewareFunc_Failed_UseRememberCookie_UserNotFound(t *testing.T) 
 	assert.NoError(t, err)
 	assert.NotEmpty(t, cookie)
 
-	sess, _ := session.Get(sessionauth.AuthSessionName, ctx)
+	sess, _ := session.Get(sa.Config.AuthSessionName, ctx)
 	// The only session value is `_fresh = false`
 	assert.Equal(t, len(sess.Values), 1, sess.Values)
 }
@@ -446,7 +280,7 @@ func TestAuthMiddlewareFunc_Success_UseRememberCookie(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, cookie)
 
-	sess, _ := session.Get(sessionauth.AuthSessionName, ctx)
+	sess, _ := session.Get(sa.Config.AuthSessionName, ctx)
 	// has session `_fresh = false`
 	assert.Equal(t, len(sess.Values), 1, sess.Values)
 }
@@ -466,7 +300,7 @@ func TestAuthMiddlewareFunc_Success_NoFresh(t *testing.T) {
 	assert.Equal(t, rec.Code, http.StatusOK)
 	assert.NoError(t, err)
 
-	sess, err := session.Get(sessionauth.AuthSessionName, ctx)
+	sess, err := session.Get(sa.Config.AuthSessionName, ctx)
 	assert.NoError(t, err)
 	assert.NotEmpty(t, sess, "Should has `AuthSessionName` session")
 }
@@ -540,7 +374,7 @@ func Test_Logout(t *testing.T) {
 	for _, v := range rec.HeaderMap["Set-Cookie"] {
 		if strings.Contains(v, "remember_token=;") {
 			check_remember_cookie = true
-		} else if strings.Contains(v, fmt.Sprintf("%v", sessionauth.AuthSessionName)) {
+		} else if strings.Contains(v, fmt.Sprintf("%v", sa.Config.AuthSessionName)) {
 			check_sess_auth_count += 1
 		}
 	}
